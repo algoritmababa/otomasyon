@@ -30,29 +30,9 @@ REF_FILE_PATH = r"C:\proje\ref.txt"
 # Chat'e gonderilecek mesaj.
 CHAT_MESSAGE = "ref güncellendi sıradaki adıma geçilsin"
 
-# Chat panelinin nasil acilacagi:
-#   "shortcut" : CHAT_SHORTCUT kisayolu gonderilir.
-#   "command"  : Komut paleti (Ctrl+Shift+P) acilir, CHAT_COMMAND yazilip Enter'a basilir.
-#                Bir uzantinin (Claude Code, Cline, Continue vb.) chat'ini hedeflemek
-#                icin en kolay yol budur; kisayol atamaniz gerekmez.
-CHAT_OPEN_METHOD = "shortcut"
-
-# "shortcut" modu: Chat panelini acan/odaklayan kisayol.
-# Ornekler: "ctrl+alt+i" (VS Code varsayilani - Chat), "ctrl+shift+i",
-#           "ctrl+i" (inline chat). Tuslar '+' ile ayrilir.
-# Art arda basilmasi gereken birden fazla tus varsa liste olarak yazin;
-# her biri sirayla, aralarinda SHORTCUT_STEP_DELAY beklenerek basilir:
-#   CHAT_SHORTCUT = ["ctrl+alt+k", "enter"]
-CHAT_SHORTCUT = "ctrl+alt+i"
-SHORTCUT_STEP_DELAY = 0.5   # Liste halindeki tuslar arasi bekleme (saniye)
-
-# "command" modu: Komut paletinde gorunen komut adi (birebir ayni yazilmali).
-# Dogru adi bulmak icin VS Code'da Ctrl+Shift+P'ye basip uzantinin adini yazin
-# ve chat'i acan/odaklayan komutu (genelde "... Focus ..." / "... Open ...") secin.
-# NOT: VS Code arayuzu Turkce ise komut adlari da Turkce gorunur, o hali yazilmalidir.
-CHAT_COMMAND = "Chat: Open Chat"
-COMMAND_PALETTE_SHORTCUT = "ctrl+shift+p"
-DELAY_IN_PALETTE = 0.8      # Komut adi yazildiktan sonra listenin filtrelenmesi icin
+# VS Code Chat panelini acan kisayol (VS Code'da cline.addToChat komutuna atandi).
+# Tuslar '+' ile ayrilir, kucuk harfle yazilir. Ornek: "ctrl+alt+k", "ctrl+shift+f9"
+CHAT_SHORTCUT = "ctrl+alt+k"
 
 # VS Code penceresini bulmak icin pencere basliginda aranacak metin.
 # Birden fazla VS Code penceresi varsa, ornegin proje adini yazabilirsiniz:
@@ -239,32 +219,6 @@ def activate_window(hwnd):
     return user32.GetForegroundWindow() == hwnd
 
 
-def open_chat():
-    """
-    Chat panelini acar ve yazi kutusuna odaklanir.
-    Uzanti panelleri (webview) Windows tarafinda ayri pencere olmadigi icin
-    dogrudan bulunamaz; bunun yerine VS Code'un kendi komut sistemi kullanilir.
-    """
-    if CHAT_OPEN_METHOD == "command":
-        press_shortcut(COMMAND_PALETTE_SHORTCUT)  # komut paletini ac (">" ile baslar)
-        time.sleep(0.5)
-        type_text(CHAT_COMMAND)                   # komut adini yaz -> liste filtrelenir
-        time.sleep(DELAY_IN_PALETTE)
-        press_enter()                             # ilk eslesen komutu calistir
-    else:
-        for i, step in enumerate(shortcut_steps()):
-            if i > 0:
-                time.sleep(SHORTCUT_STEP_DELAY)
-            press_shortcut(step)
-
-
-def shortcut_steps():
-    """CHAT_SHORTCUT tek metin ya da metin listesi olabilir; her zaman liste dondurur."""
-    if isinstance(CHAT_SHORTCUT, str):
-        return [CHAT_SHORTCUT]
-    return list(CHAT_SHORTCUT)
-
-
 def send_chat_message():
     """Guncelleme tamamlandiginda yapilacak islem: VS Code Chat'e mesaj gonder."""
     hwnd = find_vscode_window(VSCODE_WINDOW_TITLE)
@@ -276,7 +230,7 @@ def send_chat_message():
         print("UYARI: VS Code penceresi on plana alinamamis olabilir.", file=sys.stderr)
     time.sleep(DELAY_AFTER_FOCUS)
 
-    open_chat()                         # Chat panelini ac / input'a odaklan
+    press_shortcut(CHAT_SHORTCUT)       # Chat panelini ac / input'a odaklan
     time.sleep(DELAY_AFTER_SHORTCUT)
 
     type_text(CHAT_MESSAGE)             # Mesaji yaz
@@ -334,12 +288,7 @@ def watch(path, on_update):
 def main():
     path = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else REF_FILE_PATH)
     try:
-        # ayar hatalarini erkenden yakala
-        if CHAT_OPEN_METHOD not in ("shortcut", "command"):
-            raise ValueError("CHAT_OPEN_METHOD 'shortcut' veya 'command' olmali.")
-        for step in shortcut_steps():
-            parse_shortcut(step)
-        parse_shortcut(COMMAND_PALETTE_SHORTCUT)
+        parse_shortcut(CHAT_SHORTCUT)  # kisayol hatalarini erkenden yakala
     except ValueError as exc:
         print("HATA: %s" % exc, file=sys.stderr)
         sys.exit(1)
