@@ -40,7 +40,11 @@ CHAT_OPEN_METHOD = "shortcut"
 # "shortcut" modu: Chat panelini acan/odaklayan kisayol.
 # Ornekler: "ctrl+alt+i" (VS Code varsayilani - Chat), "ctrl+shift+i",
 #           "ctrl+i" (inline chat). Tuslar '+' ile ayrilir.
+# Art arda basilmasi gereken birden fazla tus varsa liste olarak yazin;
+# her biri sirayla, aralarinda SHORTCUT_STEP_DELAY beklenerek basilir:
+#   CHAT_SHORTCUT = ["ctrl+alt+k", "enter"]
 CHAT_SHORTCUT = "ctrl+alt+i"
+SHORTCUT_STEP_DELAY = 0.5   # Liste halindeki tuslar arasi bekleme (saniye)
 
 # "command" modu: Komut paletinde gorunen komut adi (birebir ayni yazilmali).
 # Dogru adi bulmak icin VS Code'da Ctrl+Shift+P'ye basip uzantinin adini yazin
@@ -248,7 +252,17 @@ def open_chat():
         time.sleep(DELAY_IN_PALETTE)
         press_enter()                             # ilk eslesen komutu calistir
     else:
-        press_shortcut(CHAT_SHORTCUT)
+        for i, step in enumerate(shortcut_steps()):
+            if i > 0:
+                time.sleep(SHORTCUT_STEP_DELAY)
+            press_shortcut(step)
+
+
+def shortcut_steps():
+    """CHAT_SHORTCUT tek metin ya da metin listesi olabilir; her zaman liste dondurur."""
+    if isinstance(CHAT_SHORTCUT, str):
+        return [CHAT_SHORTCUT]
+    return list(CHAT_SHORTCUT)
 
 
 def send_chat_message():
@@ -323,7 +337,8 @@ def main():
         # ayar hatalarini erkenden yakala
         if CHAT_OPEN_METHOD not in ("shortcut", "command"):
             raise ValueError("CHAT_OPEN_METHOD 'shortcut' veya 'command' olmali.")
-        parse_shortcut(CHAT_SHORTCUT)
+        for step in shortcut_steps():
+            parse_shortcut(step)
         parse_shortcut(COMMAND_PALETTE_SHORTCUT)
     except ValueError as exc:
         print("HATA: %s" % exc, file=sys.stderr)
