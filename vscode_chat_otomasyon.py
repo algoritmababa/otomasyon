@@ -30,10 +30,25 @@ REF_FILE_PATH = r"C:\proje\ref.txt"
 # Chat'e gonderilecek mesaj.
 CHAT_MESSAGE = "ref güncellendi sıradaki adıma geçilsin"
 
-# VS Code Chat panelini acan/odaklayan kisayol.
+# Chat panelinin nasil acilacagi:
+#   "shortcut" : CHAT_SHORTCUT kisayolu gonderilir.
+#   "command"  : Komut paleti (Ctrl+Shift+P) acilir, CHAT_COMMAND yazilip Enter'a basilir.
+#                Bir uzantinin (Claude Code, Cline, Continue vb.) chat'ini hedeflemek
+#                icin en kolay yol budur; kisayol atamaniz gerekmez.
+CHAT_OPEN_METHOD = "shortcut"
+
+# "shortcut" modu: Chat panelini acan/odaklayan kisayol.
 # Ornekler: "ctrl+alt+i" (VS Code varsayilani - Chat), "ctrl+shift+i",
 #           "ctrl+i" (inline chat). Tuslar '+' ile ayrilir.
 CHAT_SHORTCUT = "ctrl+alt+i"
+
+# "command" modu: Komut paletinde gorunen komut adi (birebir ayni yazilmali).
+# Dogru adi bulmak icin VS Code'da Ctrl+Shift+P'ye basip uzantinin adini yazin
+# ve chat'i acan/odaklayan komutu (genelde "... Focus ..." / "... Open ...") secin.
+# NOT: VS Code arayuzu Turkce ise komut adlari da Turkce gorunur, o hali yazilmalidir.
+CHAT_COMMAND = "Chat: Open Chat"
+COMMAND_PALETTE_SHORTCUT = "ctrl+shift+p"
+DELAY_IN_PALETTE = 0.8      # Komut adi yazildiktan sonra listenin filtrelenmesi icin
 
 # VS Code penceresini bulmak icin pencere basliginda aranacak metin.
 # Birden fazla VS Code penceresi varsa, ornegin proje adini yazabilirsiniz:
@@ -220,6 +235,22 @@ def activate_window(hwnd):
     return user32.GetForegroundWindow() == hwnd
 
 
+def open_chat():
+    """
+    Chat panelini acar ve yazi kutusuna odaklanir.
+    Uzanti panelleri (webview) Windows tarafinda ayri pencere olmadigi icin
+    dogrudan bulunamaz; bunun yerine VS Code'un kendi komut sistemi kullanilir.
+    """
+    if CHAT_OPEN_METHOD == "command":
+        press_shortcut(COMMAND_PALETTE_SHORTCUT)  # komut paletini ac (">" ile baslar)
+        time.sleep(0.5)
+        type_text(CHAT_COMMAND)                   # komut adini yaz -> liste filtrelenir
+        time.sleep(DELAY_IN_PALETTE)
+        press_enter()                             # ilk eslesen komutu calistir
+    else:
+        press_shortcut(CHAT_SHORTCUT)
+
+
 def send_chat_message():
     """Guncelleme tamamlandiginda yapilacak islem: VS Code Chat'e mesaj gonder."""
     hwnd = find_vscode_window(VSCODE_WINDOW_TITLE)
@@ -231,7 +262,7 @@ def send_chat_message():
         print("UYARI: VS Code penceresi on plana alinamamis olabilir.", file=sys.stderr)
     time.sleep(DELAY_AFTER_FOCUS)
 
-    press_shortcut(CHAT_SHORTCUT)       # Chat panelini ac / odakla
+    open_chat()                         # Chat panelini ac / input'a odaklan
     time.sleep(DELAY_AFTER_SHORTCUT)
 
     type_text(CHAT_MESSAGE)             # Mesaji yaz
@@ -289,7 +320,11 @@ def watch(path, on_update):
 def main():
     path = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else REF_FILE_PATH)
     try:
-        parse_shortcut(CHAT_SHORTCUT)  # kisayol hatalarini erkenden yakala
+        # ayar hatalarini erkenden yakala
+        if CHAT_OPEN_METHOD not in ("shortcut", "command"):
+            raise ValueError("CHAT_OPEN_METHOD 'shortcut' veya 'command' olmali.")
+        parse_shortcut(CHAT_SHORTCUT)
+        parse_shortcut(COMMAND_PALETTE_SHORTCUT)
     except ValueError as exc:
         print("HATA: %s" % exc, file=sys.stderr)
         sys.exit(1)
