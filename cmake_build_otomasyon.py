@@ -58,6 +58,11 @@ WAIT_FOR_EXECUTABLE = True
 # (Calistirilan programin kendi ciktisi her zaman gorunur.)
 SHOW_BUILD_OUTPUT = False
 
+# True : Derleme basarisiz olsa bile build klasorunde mevcut olan (bir onceki basarili
+#        derlemeden kalan) executable yine de calistirilir.
+# False: Derleme basarisizsa executable calistirilmaz.
+RUN_EVEN_IF_BUILD_FAILS = True
+
 # Paralel derleme is sayisi (None = CMake/derleyici varsayilani).
 PARALLEL_JOBS = None
 
@@ -160,7 +165,7 @@ def build_project(project_dir, build_dir):
     if PARALLEL_JOBS:
         build_cmd += ["--parallel", str(PARALLEL_JOBS)]
     if not run_command(build_cmd):
-        error("Derleme basarisiz. Executable calistirilmayacak.")
+        error("Derleme basarisiz.")
         return False
     log("Derleme basarili.")
     return True
@@ -174,7 +179,11 @@ def build_and_run():
     stop_running_process()
 
     if BUILD_ENABLED and not build_project(project_dir, build_dir):
-        return
+        if not RUN_EVEN_IF_BUILD_FAILS:
+            error("Executable calistirilmayacak (RUN_EVEN_IF_BUILD_FAILS = False).")
+            return
+        # Derleme basarisiz: varsa onceki derlemeden kalan executable calistirilir.
+        log("UYARI: Derleme basarisiz, mevcut (eski) executable calistirilacak.")
 
     # 5) Executable kontrolu ve calistirma (./executable mantigi)
     if not os.path.isfile(exe_path):

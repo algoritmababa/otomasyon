@@ -21,6 +21,7 @@ python vscode_chat_otomasyon.py "C:\proje\ref.txt"
 
 `ref.txt` güncellenince CMake ile configure + build yapar, başarılıysa executable'ı çalıştırır.
 Derleme çıktısı gizlenir, yalnızca hata olursa gösterilir (`SHOW_BUILD_OUTPUT`).
+Derleme başarısız olsa bile mevcut (eski) executable çalıştırılır (`RUN_EVEN_IF_BUILD_FAILS`).
 Programın kendi çıktısı her zaman görünür.
 Ayarlar dosyanın başında: `REF_FILE_PATH`, `BUILD_ENABLED`, `PROJECT_DIR`, `BUILD_DIR`, `BUILD_TYPE`,
 `EXECUTABLE_PATH`, `EXECUTABLE_ARGS`, `WAIT_FOR_EXECUTABLE`, `SHOW_BUILD_OUTPUT`.
