@@ -19,12 +19,11 @@ python vscode_chat_otomasyon.py "C:\proje\ref.txt"
 
 ## 2) `cmake_build_otomasyon.py` — Ubuntu
 
-CMake ile configure + build yapar, başarılıysa executable'ı çalıştırır.
-Ayarlar dosyanın başında: `REF_FILE_PATH`, `PROJECT_DIR`, `BUILD_DIR`, `BUILD_TYPE`,
-`EXECUTABLE_PATH`, `EXECUTABLE_ARGS`, `WAIT_FOR_EXECUTABLE`.
+`ref.txt` güncellenince `SCRIPT_PATH` ile verilen `.sh` dosyasını bir kez çalıştırır
+(derleme gerekiyorsa `.sh` içinde yapılır). Çıktı gizlenir, yalnızca hata olursa gösterilir.
+Ayarlar dosyanın başında: `REF_FILE_PATH`, `SCRIPT_PATH`, `SCRIPT_ARGS`, `SHOW_SCRIPT_OUTPUT`.
 
 ```bash
-sudo apt update && sudo apt install -y cmake build-essential python3
+chmod +x /home/kullanici/proje/ornek.sh
 python3 cmake_build_otomasyon.py
-python3 cmake_build_otomasyon.py /home/kullanici/proje/ref.txt
 ```
