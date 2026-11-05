@@ -1,20 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-SCRIPT 2 - Ubuntu: ref.txt Guncellenince Shell Script Calistirma
-=================================================================
+SCRIPT 2 - Ubuntu: CMake Build Otomasyonu
+=========================================
 
 ref.txt dosyasini izler. Dosya guncellenip yazma islemi tamamen bittiginde
-(son degistirilme zamani ve boyutu STABLE_SECONDS boyunca degismezse)
-SCRIPT_PATH ile verilen .sh dosyasini ./ornek.sh mantigiyla BIR KEZ calistirir.
-Derleme gerekiyorsa bu islem .sh dosyasinin icinde yapilir.
+(son degistirilme zamani ve boyutu STABLE_SECONDS boyunca degismezse):
+  1. CMake projesini yapilandirir (configure) ve derler (build),
+  2. Derleme basariliysa olusan executable dosyasini calistirir.
 
-Varsayilan olarak .sh dosyasinin ciktisi terminale yazdirilmaz;
-yalnizca hata olursa (cikis kodu 0 degilse) cikti ve hata mesaji gosterilir.
-
-Harici bagimlilik YOKTUR (sadece Python standart kutuphanesi).
+Harici Python bagimliligi YOKTUR (sadece standart kutuphane).
 
 Uyumluluk : Python 3.10.6 / 3.10.12 (Ubuntu)
-Hazirlik  : chmod +x /home/kullanici/proje/ornek.sh   (ilk satir: #!/bin/bash)
+Kurulum   : sudo apt update && sudo apt install -y cmake build-essential python3
 Calistirma: python3 cmake_build_otomasyon.py
             python3 cmake_build_otomasyon.py /yol/ref.txt   (opsiyonel yol)
 Durdurma  : Ctrl+C
@@ -28,16 +25,44 @@ Durdurma  : Ctrl+C
 # Komut satirindan ilk arguman olarak verilirse o deger kullanilir.
 REF_FILE_PATH = "/home/kullanici/proje/ref.txt"
 
-# Calistirilacak shell script'in tam yolu.
-# Ilk satirinda "#!/bin/bash" olmali ve "chmod +x" ile calistirma izni verilmeli.
-SCRIPT_PATH = "/home/kullanici/proje/ornek.sh"
+# True : ref.txt guncellenince once CMake ile derlenir, basariliysa EXECUTABLE_PATH calistirilir.
+# False: Derleme ATLANIR; EXECUTABLE_PATH (ornek: bir .sh scripti) dogrudan calistirilir.
+BUILD_ENABLED = True
 
-# Script'e verilecek argumanlar (ornek: ["Release"]).
-SCRIPT_ARGS = []
+# CMake proje dizini (CMakeLists.txt bu dizinde aranir).
+PROJECT_DIR = "/home/kullanici/proje"
 
-# False: Script'in (derleme vb.) ciktisi gizlenir; sadece hata olursa gosterilir.
-# True : Script'in tum ciktisi terminalde canli gorunur.
-SHOW_SCRIPT_OUTPUT = False
+# Build klasoru. Goreli yol verilirse PROJECT_DIR'e gore hesaplanir.
+# Klasor yoksa otomatik olusturulur.
+BUILD_DIR = "build"
+
+# Build konfigurasyonu: "Release" veya "Debug" (RelWithDebInfo, MinSizeRel de olur).
+BUILD_TYPE = "Release"
+
+# Calistirilacak dosyanin yolu (derlenen program ya da ornek.sh gibi bir script).
+# Tam yol onerilir: "/home/kullanici/proje/ornek.sh"
+# Goreli yol verilirse: BUILD_ENABLED=True ise BUILD_DIR'e, False ise PROJECT_DIR'e gore hesaplanir.
+# Shell script icin: ilk satirda "#!/bin/bash" olmali ve "chmod +x ornek.sh" yapilmali.
+EXECUTABLE_PATH = "uygulama"
+
+# Executable'a verilecek komut satiri argumanlari (ornek: ["--verbose", "girdi.txt"]).
+EXECUTABLE_ARGS = []
+
+# True : Program bitene kadar beklenir (cikti terminalde gorunur, sonra izlemeye donulur).
+# False: Program arka planda baslatilir, izleme devam eder; yeni guncellemede
+#        eski calisan program durdurulup yeniden derlenir/calistirilir.
+WAIT_FOR_EXECUTABLE = True
+
+# False: CMake configure/build ciktisi gizlenir; sadece hata olursa gosterilir.
+# True : Tum derleme ciktisi terminalde gorunur.
+# (Calistirilan programin kendi ciktisi her zaman gorunur.)
+SHOW_BUILD_OUTPUT = False
+
+# Paralel derleme is sayisi (None = CMake/derleyici varsayilani).
+PARALLEL_JOBS = None
+
+# Ek CMake configure argumanlari (ornek: ["-G", "Ninja"] veya ["-DOZELLIK=ON"]).
+EXTRA_CMAKE_ARGS = []
 
 # Dosya izleme ayarlari.
 POLL_INTERVAL = 0.5     # Kontrol araligi (saniye)
@@ -52,6 +77,9 @@ import subprocess
 import sys
 import time
 
+# Arka planda calisan executable (WAIT_FOR_EXECUTABLE = False iken kullanilir).
+running_process = None
+
 
 def log(msg):
     print("[%s] %s" % (time.strftime("%H:%M:%S"), msg), flush=True)
@@ -61,40 +89,116 @@ def error(msg):
     print("[%s] HATA: %s" % (time.strftime("%H:%M:%S"), msg), file=sys.stderr, flush=True)
 
 
-def run_script():
-    """Guncelleme tamamlandiginda yapilacak islem: .sh dosyasini calistir."""
-    script = os.path.abspath(os.path.expanduser(SCRIPT_PATH))
+def resolve_paths():
+    """Konfigurasyondaki yollari mutlak yola cevirir."""
+    project_dir = os.path.abspath(os.path.expanduser(PROJECT_DIR))
+    build_dir = os.path.join(project_dir, os.path.expanduser(BUILD_DIR))
+    base_dir = build_dir if BUILD_ENABLED else project_dir
+    exe_path = os.path.join(base_dir, os.path.expanduser(EXECUTABLE_PATH))
+    return project_dir, os.path.abspath(build_dir), os.path.abspath(exe_path)
 
-    if not os.path.isfile(script):
-        error("Script bulunamadi: %s (SCRIPT_PATH ayarini kontrol edin)" % script)
-        return
-    if not os.access(script, os.X_OK):
-        error("Script calistirilabilir degil: %s (chmod +x %s)" % (script, script))
+
+def run_command(cmd, cwd=None):
+    """
+    Derleme komutunu calistirir; basariliysa True dondurur.
+    SHOW_BUILD_OUTPUT=False ise cikti yakalanir ve yalnizca hata olursa yazdirilir.
+    """
+    try:
+        if SHOW_BUILD_OUTPUT:
+            log("Komut: %s" % " ".join(cmd))
+            result = subprocess.run(cmd, cwd=cwd)
+        else:
+            result = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT)
+            if result.returncode != 0:
+                output = result.stdout.decode("utf-8", errors="replace")
+                print(output, file=sys.stderr, end="" if output.endswith("\n") else "\n")
+    except FileNotFoundError:
+        error("'%s' bulunamadi. Kurulu mu? (sudo apt install cmake build-essential)" % cmd[0])
+        return False
+    if result.returncode != 0:
+        error("Komut basarisiz oldu (cikis kodu: %d)" % result.returncode)
+        return False
+    return True
+
+
+def stop_running_process():
+    """Arka planda calisan onceki executable varsa durdurur."""
+    global running_process
+    if running_process is not None and running_process.poll() is None:
+        log("Onceki calisan program durduruluyor (PID %d)..." % running_process.pid)
+        running_process.terminate()
+        try:
+            running_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            running_process.kill()
+            running_process.wait()
+    running_process = None
+
+
+def build_project(project_dir, build_dir):
+    """CMake configure + build yapar; basariliysa True dondurur."""
+    # 1) CMakeLists.txt kontrolu
+    if not os.path.isfile(os.path.join(project_dir, "CMakeLists.txt")):
+        error("CMakeLists.txt bulunamadi: %s" % project_dir)
+        return False
+
+    # 2) Build klasoru yoksa olustur
+    os.makedirs(build_dir, exist_ok=True)
+
+    log("Derleniyor (%s)..." % BUILD_TYPE)
+
+    # 3) Configure: cmake -S <proje> -B <build> -DCMAKE_BUILD_TYPE=<tip>
+    configure_cmd = ["cmake", "-S", project_dir, "-B", build_dir,
+                     "-DCMAKE_BUILD_TYPE=%s" % BUILD_TYPE] + list(EXTRA_CMAKE_ARGS)
+    if not run_command(configure_cmd):
+        error("CMake yapilandirmasi basarisiz.")
+        return False
+
+    # 4) Build: cmake --build <build> --config <tip> [--parallel N]
+    build_cmd = ["cmake", "--build", build_dir, "--config", BUILD_TYPE]
+    if PARALLEL_JOBS:
+        build_cmd += ["--parallel", str(PARALLEL_JOBS)]
+    if not run_command(build_cmd):
+        error("Derleme basarisiz. Executable calistirilmayacak.")
+        return False
+    log("Derleme basarili.")
+    return True
+
+
+def build_and_run():
+    """Guncelleme tamamlandiginda yapilacak islem: (istenirse) derle ve calistir."""
+    global running_process
+    project_dir, build_dir, exe_path = resolve_paths()
+
+    stop_running_process()
+
+    if BUILD_ENABLED and not build_project(project_dir, build_dir):
         return
 
-    cmd = [script] + list(SCRIPT_ARGS)
+    # 5) Executable kontrolu ve calistirma (./executable mantigi)
+    if not os.path.isfile(exe_path):
+        error("Executable bulunamadi: %s (EXECUTABLE_PATH ayarini kontrol edin)" % exe_path)
+        return
+    if not os.access(exe_path, os.X_OK):
+        error("Dosya calistirilabilir degil: %s (chmod +x gerekebilir)" % exe_path)
+        return
+
+    cmd = [exe_path] + list(EXECUTABLE_ARGS)
+    exe_dir = os.path.dirname(exe_path)  # program kendi klasorunde calistirilir
     log("Calistiriliyor: %s" % " ".join(cmd))
     try:
-        if SHOW_SCRIPT_OUTPUT:
-            # Cikti dogrudan terminale akar.
-            result = subprocess.run(cmd, cwd=os.path.dirname(script))
-            output = ""
+        if WAIT_FOR_EXECUTABLE:
+            result = subprocess.run(cmd, cwd=exe_dir)
+            if result.returncode == 0:
+                log("Program basariyla sonlandi.")
+            else:
+                error("Program %d cikis koduyla sonlandi." % result.returncode)
         else:
-            # Cikti (stdout + stderr) yakalanir, sadece hata durumunda yazdirilir.
-            result = subprocess.run(cmd, cwd=os.path.dirname(script),
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            output = result.stdout.decode("utf-8", errors="replace")
+            running_process = subprocess.Popen(cmd, cwd=exe_dir)
+            log("Program arka planda baslatildi (PID %d)." % running_process.pid)
     except OSError as exc:
-        # Ornek: ilk satirda #!/bin/bash yoksa "Exec format error"
-        error("Script calistirilamadi: %s" % exc)
-        return
-
-    if result.returncode == 0:
-        log("Script basariyla tamamlandi.")
-    else:
-        if output:
-            print(output, file=sys.stderr, end="" if output.endswith("\n") else "\n")
-        error("Script %d cikis koduyla sonlandi." % result.returncode)
+        error("Program calistirilamadi: %s" % exc)
 
 
 # ---- Dosya izleme --------------------------------------------------------------
@@ -135,7 +239,7 @@ def watch(path, on_update):
 
         if (current is not None and current != processed
                 and now - last_change >= STABLE_SECONDS):
-            log("Guncelleme tamamlandi, script baslatiliyor...")
+            log("Guncelleme tamamlandi, islem baslatiliyor...")
             try:
                 on_update()
             except Exception as exc:  # izlemeyi durdurmadan hatayi raporla
@@ -145,12 +249,20 @@ def watch(path, on_update):
 
 def main():
     path = os.path.abspath(os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else REF_FILE_PATH))
-    log("Script : %s" % os.path.abspath(os.path.expanduser(SCRIPT_PATH)))
+    project_dir, build_dir, exe_path = resolve_paths()
+    log("Proje dizini : %s" % project_dir)
+    if BUILD_ENABLED:
+        log("Build dizini : %s (%s)" % (build_dir, BUILD_TYPE))
+    else:
+        log("Derleme      : KAPALI (dosya dogrudan calistirilacak)")
+    log("Executable   : %s" % exe_path)
     try:
-        watch(path, run_script)
+        watch(path, build_and_run)
     except KeyboardInterrupt:
         print()
         log("Durduruldu.")
+    finally:
+        stop_running_process()
 
 
 if __name__ == "__main__":
