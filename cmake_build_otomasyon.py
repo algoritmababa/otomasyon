@@ -25,6 +25,10 @@ Durdurma  : Ctrl+C
 # Komut satirindan ilk arguman olarak verilirse o deger kullanilir.
 REF_FILE_PATH = "/home/kullanici/proje/ref.txt"
 
+# True : ref.txt guncellenince once CMake ile derlenir, basariliysa EXECUTABLE_PATH calistirilir.
+# False: Derleme ATLANIR; EXECUTABLE_PATH (ornek: bir .sh scripti) dogrudan calistirilir.
+BUILD_ENABLED = True
+
 # CMake proje dizini (CMakeLists.txt bu dizinde aranir).
 PROJECT_DIR = "/home/kullanici/proje"
 
@@ -35,8 +39,10 @@ BUILD_DIR = "build"
 # Build konfigurasyonu: "Release" veya "Debug" (RelWithDebInfo, MinSizeRel de olur).
 BUILD_TYPE = "Release"
 
-# Derleme sonucunda olusan executable dosyasinin yolu.
-# Goreli yol verilirse BUILD_DIR'e gore hesaplanir (ornek: "uygulama" -> build/uygulama).
+# Calistirilacak dosyanin yolu (derlenen program ya da ornek.sh gibi bir script).
+# Tam yol onerilir: "/home/kullanici/proje/ornek.sh"
+# Goreli yol verilirse: BUILD_ENABLED=True ise BUILD_DIR'e, False ise PROJECT_DIR'e gore hesaplanir.
+# Shell script icin: ilk satirda "#!/bin/bash" olmali ve "chmod +x ornek.sh" yapilmali.
 EXECUTABLE_PATH = "uygulama"
 
 # Executable'a verilecek komut satiri argumanlari (ornek: ["--verbose", "girdi.txt"]).
@@ -44,7 +50,7 @@ EXECUTABLE_ARGS = []
 
 # True : Program bitene kadar beklenir (cikti terminalde gorunur, sonra izlemeye donulur).
 # False: Program arka planda baslatilir, izleme devam eder; yeni guncellemede
-#        eski calisan program durdurulup yeniden derlenir.
+#        eski calisan program durdurulup yeniden derlenir/calistirilir.
 WAIT_FOR_EXECUTABLE = True
 
 # Paralel derleme is sayisi (None = CMake/derleyici varsayilani).
@@ -82,7 +88,8 @@ def resolve_paths():
     """Konfigurasyondaki yollari mutlak yola cevirir."""
     project_dir = os.path.abspath(os.path.expanduser(PROJECT_DIR))
     build_dir = os.path.join(project_dir, os.path.expanduser(BUILD_DIR))
-    exe_path = os.path.join(build_dir, os.path.expanduser(EXECUTABLE_PATH))
+    base_dir = build_dir if BUILD_ENABLED else project_dir
+    exe_path = os.path.join(base_dir, os.path.expanduser(EXECUTABLE_PATH))
     return project_dir, os.path.abspath(build_dir), os.path.abspath(exe_path)
 
 
@@ -114,27 +121,22 @@ def stop_running_process():
     running_process = None
 
 
-def build_and_run():
-    """Guncelleme tamamlandiginda yapilacak islem: derle ve calistir."""
-    global running_process
-    project_dir, build_dir, exe_path = resolve_paths()
-
+def build_project(project_dir, build_dir):
+    """CMake configure + build yapar; basariliysa True dondurur."""
     # 1) CMakeLists.txt kontrolu
     if not os.path.isfile(os.path.join(project_dir, "CMakeLists.txt")):
         error("CMakeLists.txt bulunamadi: %s" % project_dir)
-        return
+        return False
 
     # 2) Build klasoru yoksa olustur
     os.makedirs(build_dir, exist_ok=True)
-
-    stop_running_process()
 
     # 3) Configure: cmake -S <proje> -B <build> -DCMAKE_BUILD_TYPE=<tip>
     configure_cmd = ["cmake", "-S", project_dir, "-B", build_dir,
                      "-DCMAKE_BUILD_TYPE=%s" % BUILD_TYPE] + list(EXTRA_CMAKE_ARGS)
     if not run_command(configure_cmd):
         error("CMake yapilandirmasi basarisiz.")
-        return
+        return False
 
     # 4) Build: cmake --build <build> --config <tip> [--parallel N]
     build_cmd = ["cmake", "--build", build_dir, "--config", BUILD_TYPE]
@@ -142,8 +144,20 @@ def build_and_run():
         build_cmd += ["--parallel", str(PARALLEL_JOBS)]
     if not run_command(build_cmd):
         error("Derleme basarisiz. Executable calistirilmayacak.")
-        return
+        return False
     log("Derleme basarili.")
+    return True
+
+
+def build_and_run():
+    """Guncelleme tamamlandiginda yapilacak islem: (istenirse) derle ve calistir."""
+    global running_process
+    project_dir, build_dir, exe_path = resolve_paths()
+
+    stop_running_process()
+
+    if BUILD_ENABLED and not build_project(project_dir, build_dir):
+        return
 
     # 5) Executable kontrolu ve calistirma (./executable mantigi)
     if not os.path.isfile(exe_path):
@@ -208,7 +222,7 @@ def watch(path, on_update):
 
         if (current is not None and current != processed
                 and now - last_change >= STABLE_SECONDS):
-            log("Guncelleme tamamlandi, derleme baslatiliyor...")
+            log("Guncelleme tamamlandi, islem baslatiliyor...")
             try:
                 on_update()
             except Exception as exc:  # izlemeyi durdurmadan hatayi raporla
@@ -220,7 +234,10 @@ def main():
     path = os.path.abspath(os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else REF_FILE_PATH))
     project_dir, build_dir, exe_path = resolve_paths()
     log("Proje dizini : %s" % project_dir)
-    log("Build dizini : %s (%s)" % (build_dir, BUILD_TYPE))
+    if BUILD_ENABLED:
+        log("Build dizini : %s (%s)" % (build_dir, BUILD_TYPE))
+    else:
+        log("Derleme      : KAPALI (dosya dogrudan calistirilacak)")
     log("Executable   : %s" % exe_path)
     try:
         watch(path, build_and_run)
